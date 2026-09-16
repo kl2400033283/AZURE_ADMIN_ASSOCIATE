@@ -1,4 +1,4 @@
-Requirements
+Requirements : -    
     1.An active Azure subscription with permissions to create Load Balancers, Virtual  
     2. Machines/VMSS, Virtual networks and Network Security Groups
     3.Standard SKU Load Balancer (Basic SKU does not support outbound rules)
