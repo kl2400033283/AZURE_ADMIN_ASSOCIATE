@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Azure Chatty Application - Outbound SNAT & NAT Gateway Demo</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #0a0f1d;
+      --bg-card: rgba(18, 26, 47, 0.85);
+      --bg-card-hover: rgba(24, 35, 63, 0.95);
+      --border-color: rgba(56, 89, 138, 0.25);
+      --border-glow: rgba(0, 120, 212, 0.4);
+      --azure-blue: #0078d4;
+      --azure-blue-hover: #1084e3;
+      --azure-cyan: #00d2ff;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-amber: #f59e0b;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(0, 120, 212, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(0, 210, 255, 0.08) 0px, transparent 50%),
+        radial-gradient(at 50% 50%, rgba(16, 24, 40, 0.5) 0px, transparent 100%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    header {
+      border-bottom: 1px solid var(--border-color);
+      background: rgba(10, 15, 29, 0.85);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 1rem 2rem;
+    }
+
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, var(--azure-blue), var(--azure-cyan));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 14px rgba(0, 120, 212, 0.4);
+    }
+
+    .brand-icon svg {
+      width: 22px;
+      height: 22px;
+      fill: #ffffff;
+    }
+
+    .brand-text h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: #ffffff;
+    }
+
+    .brand-text p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .header-meta {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .badge-instance {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.4rem 0.85rem;
+      font-size: 0.82rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .badge-instance span.label {
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+    }
+
+    .badge-instance span.hostname {
+      color: var(--azure-cyan);
+      font-family: var(--font-mono);
+      font-weight: 600;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 9999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .status-pill.idle {
+      background: rgba(100, 116, 139, 0.2);
+      border: 1px solid rgba(100, 116, 139, 0.4);
+      color: #cbd5e1;
+    }
+
+    .status-pill.running {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+    }
+
+    .status-pill.stopping {
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fbbf24;
+    }
+
+    .status-pill.completed {
+      background: rgba(0, 120, 212, 0.2);
+      border: 1px solid rgba(0, 120, 212, 0.4);
+      color: #60a5fa;
+    }
+
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: currentColor;
+    }
+
+    .status-pill.running .pulse-dot {
+      animation: pulseAnimation 1.5s infinite;
+    }
+
+    @keyframes pulseAnimation {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.4); opacity: 1; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1400px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 1.75rem 2rem 3rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* Architecture Banner */
+    .arch-banner {
+      background: linear-gradient(90deg, rgba(0, 120, 212, 0.12), rgba(0, 210, 255, 0.06));
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .arch-flow {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+
+    .flow-node {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .flow-node.active-node {
+      border-color: var(--azure-cyan);
+      color: var(--azure-cyan);
+      box-shadow: 0 0 10px rgba(0, 210, 255, 0.2);
+    }
+
+    .flow-arrow {
+      color: var(--text-dim);
+    }
+
+    .arch-tip {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* Dashboard Layout */
+    .dashboard-grid {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 1.5rem;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+      position: relative;
+    }
+
+    .card-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Form Controls */
+    .form-group {
+      margin-bottom: 1.25rem;
+    }
+
+    .form-label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .form-label .val-tag {
+      font-family: var(--font-mono);
+      color: var(--azure-cyan);
+      font-weight: 600;
+    }
+
+    .input-text {
+      width: 100%;
+      background: rgba(10, 15, 29, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.875rem;
+      color: #ffffff;
+      font-family: var(--font-mono);
+      transition: all 0.2s ease;
+    }
+
+    .input-text:focus {
+      outline: none;
+      border-color: var(--azure-blue);
+      box-shadow: 0 0 0 3px rgba(0, 120, 212, 0.25);
+    }
+
+    .url-presets {
+      display: flex;
+      gap: 0.5rem;
+      margin-top: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .preset-btn {
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .preset-btn:hover {
+      color: #ffffff;
+      border-color: var(--azure-cyan);
+    }
+
+    .range-wrap {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .range-input {
+      flex: 1;
+      accent-color: var(--azure-blue);
+      cursor: pointer;
+    }
+
+    .range-number {
+      width: 80px;
+      background: rgba(10, 15, 29, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.4rem 0.5rem;
+      font-size: 0.82rem;
+      color: #ffffff;
+      font-family: var(--font-mono);
+      text-align: right;
+    }
+
+    .toggle-group {
+      background: rgba(10, 15, 29, 0.5);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 0.85rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      cursor: pointer;
+    }
+
+    .toggle-group input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      margin-top: 0.15rem;
+      accent-color: var(--azure-blue);
+      cursor: pointer;
+    }
+
+    .toggle-text {
+      flex: 1;
+    }
+
+    .toggle-text .title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .toggle-text .desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+      line-height: 1.35;
+    }
+
+    /* Buttons */
+    .button-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+    }
+
+    .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s ease;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--azure-blue), #005a9e);
+      color: #ffffff;
+      box-shadow: 0 4px 12px rgba(0, 120, 212, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, var(--azure-blue-hover), var(--azure-blue));
+      box-shadow: 0 4px 16px rgba(0, 120, 212, 0.5);
+      transform: translateY(-1px);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(239, 68, 68, 0.3);
+      border-color: #ef4444;
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      grid-column: span 2;
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.05);
+      color: #ffffff;
+      border-color: var(--text-muted);
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    .btn svg {
+      width: 16px;
+      height: 16px;
+      fill: currentColor;
+    }
+
+    /* Safety Notice */
+    .safety-notice {
+      margin-top: 1.25rem;
+      padding: 0.65rem 0.85rem;
+      background: rgba(245, 158, 11, 0.08);
+      border: 1px solid rgba(245, 158, 11, 0.25);
+      border-radius: 6px;
+      font-size: 0.72rem;
+      color: #fbbf24;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    /* KPI Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    @media (max-width: 768px) {
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    .metric-box {
+      background: rgba(10, 15, 29, 0.65);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-box::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--azure-blue);
+    }
+
+    .metric-box.success::before { background: var(--accent-green); }
+    .metric-box.failed::before { background: var(--accent-red); }
+    .metric-box.rate::before { background: var(--azure-cyan); }
+    .metric-box.latency::before { background: var(--accent-amber); }
+    .metric-box.workers::before { background: #818cf8; }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.4rem;
+    }
+
+    .metric-val {
+      font-size: 1.75rem;
+      font-weight: 700;
+      color: #ffffff;
+      font-family: var(--font-mono);
+      line-height: 1.1;
+    }
+
+    .metric-sub {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-top: 0.35rem;
+    }
+
+    /* Progress Section */
+    .progress-section {
+      background: rgba(10, 15, 29, 0.65);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .progress-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: rgba(30, 41, 59, 0.8);
+      border-radius: 9999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--azure-blue), var(--azure-cyan));
+      border-radius: 9999px;
+      transition: width 0.3s ease;
+    }
+
+    /* Error Summary */
+    .error-box {
+      margin-bottom: 1.5rem;
+      padding: 0.85rem 1rem;
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      border-radius: 8px;
+    }
+
+    .error-box h4 {
+      font-size: 0.82rem;
+      color: #f87171;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .error-tags {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .error-tag {
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 4px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.75rem;
+      font-family: var(--font-mono);
+      color: #fca5a5;
+    }
+
+    /* Live Activity Log */
+    .log-panel {
+      background: rgba(10, 15, 29, 0.85);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    .log-panel-header {
+      padding: 0.75rem 1rem;
+      background: rgba(15, 23, 42, 0.9);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .log-table-wrap {
+      max-height: 280px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+    }
+
+    .log-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .log-table th {
+      position: sticky;
+      top: 0;
+      background: rgba(15, 23, 42, 0.95);
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      color: var(--text-dim);
+      font-weight: 500;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .log-table td {
+      padding: 0.45rem 0.75rem;
+      border-bottom: 1px solid rgba(56, 89, 138, 0.1);
+      color: #cbd5e1;
+    }
+
+    .log-table tr:hover {
+      background: rgba(30, 41, 59, 0.4);
+    }
+
+    .code-badge {
+      display: inline-block;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-weight: 600;
+      font-size: 0.72rem;
+    }
+
+    .code-badge.ok {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+
+    .code-badge.err {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-color);
+      padding: 1.25rem 2rem;
+      background: rgba(10, 15, 29, 0.9);
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .footer-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .footer-links a {
+      color: var(--azure-cyan);
+      text-decoration: none;
+      margin-left: 1.25rem;
+    }
+
+    .footer-links a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="header-content">
+      <div class="brand">
+        <div class="brand-icon">
+          <!-- Azure Cloud Icon SVG -->
+          <svg viewBox="0 0 24 24">
+            <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>Azure Chatty Application</h1>
+          <p>Outbound SNAT & NAT Gateway Demonstration Tool</p>
+        </div>
+      </div>
+
+      <div class="header-meta">
+        <div class="badge-instance">
+          <span class="label">Server Hostname</span>
+          <span class="hostname" id="server-hostname">{{ hostname }}</span>
+        </div>
+        <div id="status-pill" class="status-pill idle">
+          <span class="pulse-dot"></span>
+          <span id="status-text">IDLE</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Workspace -->
+  <main>
+
+    <!-- Architecture Callout Banner -->
+    <div class="arch-banner">
+      <div class="arch-flow">
+        <div class="flow-node">User / Browser</div>
+        <span class="flow-arrow">➔</span>
+        <div class="flow-node">Azure Load Balancer</div>
+        <span class="flow-arrow">➔</span>
+        <div class="flow-node active-node">
+          <span>Chatty Instance:</span>
+          <strong>{{ hostname }}</strong>
+        </div>
+        <span class="flow-arrow">➔</span>
+        <div class="flow-node" style="border-color: var(--azure-blue); color: #60a5fa;">
+          Azure NAT Gateway
+        </div>
+        <span class="flow-arrow">➔</span>
+        <div class="flow-node">Public Internet</div>
+      </div>
+      <div class="arch-tip">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="var(--azure-cyan)">
+          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/>
+        </svg>
+        <span>Demonstrates outbound SNAT port demand per VM instance</span>
+      </div>
+    </div>
+
+    <!-- Dashboard Content Grid -->
+    <div class="dashboard-grid">
+
+      <!-- Left Column: Test Configuration Controls -->
+      <section class="card">
+        <div class="card-title">
+          <span>Test Parameters</span>
+          <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: normal;">Configurable Target</span>
+        </div>
+
+        <form id="traffic-form" onsubmit="event.preventDefault(); startTest();">
+
+          <!-- Target URL -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Target URL</span>
+              <span class="val-tag" id="target-url-display">HTTP GET</span>
+            </div>
+            <input 
+              type="url" 
+              id="target-url" 
+              class="input-text" 
+              value="{{ default_target_url }}" 
+              required
+              placeholder="https://httpbin.org/get"
+            >
+            <div class="url-presets">
+              <button type="button" class="preset-btn" onclick="setPresetUrl('https://httpbin.org/get')">httpbin.org (Default)</button>
+              <button type="button" class="preset-btn" onclick="setPresetUrl('https://1.1.1.1')">Cloudflare 1.1.1.1</button>
+              <button type="button" class="preset-btn" onclick="setPresetUrl('https://www.google.com')">Google</button>
+            </div>
+          </div>
+
+          <!-- Total Requests -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Total Outbound Requests</span>
+              <span class="val-tag" id="total-req-val">1000</span>
+            </div>
+            <div class="range-wrap">
+              <input 
+                type="range" 
+                id="total-requests" 
+                class="range-input" 
+                min="50" 
+                max="{{ max_requests }}" 
+                step="50" 
+                value="1000"
+                oninput="syncVal('total-requests', 'total-requests-num', 'total-req-val')"
+              >
+              <input 
+                type="number" 
+                id="total-requests-num" 
+                class="range-number" 
+                min="1" 
+                max="{{ max_requests }}" 
+                value="1000"
+                oninput="syncVal('total-requests-num', 'total-requests', 'total-req-val')"
+              >
+            </div>
+          </div>
+
+          <!-- Requests Per Second -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Pacing Rate (Requests / Sec)</span>
+              <span class="val-tag" id="rps-val">50 req/s</span>
+            </div>
+            <div class="range-wrap">
+              <input 
+                type="range" 
+                id="target-rps" 
+                class="range-input" 
+                min="1" 
+                max="{{ max_rps }}" 
+                step="5" 
+                value="50"
+                oninput="syncVal('target-rps', 'target-rps-num', 'rps-val', ' req/s')"
+              >
+              <input 
+                type="number" 
+                id="target-rps-num" 
+                class="range-number" 
+                min="1" 
+                max="{{ max_rps }}" 
+                value="50"
+                oninput="syncVal('target-rps-num', 'target-rps', 'rps-val', ' req/s')"
+              >
+            </div>
+          </div>
+
+          <!-- Concurrent Workers -->
+          <div class="form-group">
+            <div class="form-label">
+              <span>Concurrent Workers (Async)</span>
+              <span class="val-tag" id="workers-val">10 tasks</span>
+            </div>
+            <div class="range-wrap">
+              <input 
+                type="range" 
+                id="concurrent-workers" 
+                class="range-input" 
+                min="1" 
+                max="{{ max_workers }}" 
+                step="1" 
+                value="10"
+                oninput="syncVal('concurrent-workers', 'concurrent-workers-num', 'workers-val', ' tasks')"
+              >
+              <input 
+                type="number" 
+                id="concurrent-workers-num" 
+                class="range-number" 
+                min="1" 
+                max="{{ max_workers }}" 
+                value="10"
+                oninput="syncVal('concurrent-workers-num', 'concurrent-workers', 'workers-val', ' tasks')"
+              >
+            </div>
+          </div>
+
+          <!-- Keep-Alive / SNAT Stress Toggle -->
+          <div class="form-group">
+            <label class="toggle-group">
+              <input type="checkbox" id="reuse-connections" checked>
+              <div class="toggle-text">
+                <div class="title">HTTP Connection Reuse (Keep-Alive)</div>
+                <div class="desc">
+                  Keep enabled for normal pooling. <strong>Uncheck</strong> to force new TCP sockets on every request, accelerating SNAT port consumption for hackathon demonstrations.
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="button-group">
+            <button type="submit" id="btn-start" class="btn btn-primary">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+              <span>Start Traffic</span>
+            </button>
+            <button type="button" id="btn-stop" class="btn btn-danger" onclick="stopTest()" disabled>
+              <svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
+              <span>Stop Test</span>
+            </button>
+            <button type="button" id="btn-reset" class="btn btn-secondary" onclick="resetStats()">
+              <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+              <span>Reset Counters</span>
+            </button>
+          </div>
+
+          <!-- Safety disclaimer -->
+          <div class="safety-notice">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#fbbf24">
+              <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
+            </svg>
+            <span>Safety enforced: Max {{ max_requests }} requests, 5 min automatic timeout.</span>
+          </div>
+
+        </form>
+      </section>
+
+      <!-- Right Column: Live Telemetry & Performance Dashboard -->
+      <section class="card">
+        <div class="card-title">
+          <span>Real-Time Telemetry</span>
+          <span style="font-size: 0.75rem; color: var(--text-dim);" id="elapsed-time">Elapsed: 0.0s</span>
+        </div>
+
+        <!-- 6 KPI Metric Cards -->
+        <div class="metrics-grid">
+          
+          <!-- Total Outbound Requests -->
+          <div class="metric-box">
+            <span class="metric-label">Total Outbound Requests</span>
+            <span class="metric-val" id="metric-total">0</span>
+            <span class="metric-sub" id="metric-target-sub">Target: 1,000</span>
+          </div>
+
+          <!-- Successful Requests -->
+          <div class="metric-box success">
+            <span class="metric-label">Successful Requests</span>
+            <span class="metric-val" style="color: var(--accent-green);" id="metric-success">0</span>
+            <span class="metric-sub" id="metric-success-rate">100.0% Success</span>
+          </div>
+
+          <!-- Failed Requests -->
+          <div class="metric-box failed">
+            <span class="metric-label">Failed Requests</span>
+            <span class="metric-val" style="color: var(--accent-red);" id="metric-failed">0</span>
+            <span class="metric-sub" id="metric-fail-rate">0.0% Drop / Timeout</span>
+          </div>
+
+          <!-- Current Request Rate -->
+          <div class="metric-box rate">
+            <span class="metric-label">Current Request Rate</span>
+            <span class="metric-val" style="color: var(--azure-cyan);" id="metric-rps">0.0</span>
+            <span class="metric-sub">req / sec</span>
+          </div>
+
+          <!-- Average Latency -->
+          <div class="metric-box latency">
+            <span class="metric-label">Avg Response Time</span>
+            <span class="metric-val" style="color: var(--accent-amber);" id="metric-avg-latency">0.0</span>
+            <span class="metric-sub" id="metric-latency-range">Min: 0ms | Max: 0ms</span>
+          </div>
+
+          <!-- Concurrent Active Workers -->
+          <div class="metric-box workers">
+            <span class="metric-label">Active / Allocated Workers</span>
+            <span class="metric-val" style="color: #a5b4fc;" id="metric-workers">0 / 10</span>
+            <span class="metric-sub">async tasks active</span>
+          </div>
+
+        </div>
+
+        <!-- Test Progress Bar -->
+        <div class="progress-section">
+          <div class="progress-header">
+            <span>Overall Progress</span>
+            <span id="progress-percentage">0%</span>
+          </div>
+          <div class="progress-bar-bg">
+            <div id="progress-bar" class="progress-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Error Summary Box (Shown conditionally when errors occur) -->
+        <div id="error-summary-box" class="error-box" style="display: none;">
+          <h4>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="#f87171">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+            </svg>
+            Error Breakdown (Potential SNAT / Network Issues):
+          </h4>
+          <div class="error-tags" id="error-tags-container"></div>
+        </div>
+
+        <!-- Live Activity Log Terminal -->
+        <div class="log-panel">
+          <div class="log-panel-header">
+            <span>Live Outbound Request Stream (Latest 50)</span>
+            <span id="log-count">0 recorded</span>
+          </div>
+          <div class="log-table-wrap">
+            <table class="log-table">
+              <thead>
+                <tr>
+                  <th style="width: 70px;"># ID</th>
+                  <th style="width: 100px;">Time</th>
+                  <th style="width: 80px;">Worker</th>
+                  <th style="width: 90px;">Status</th>
+                  <th style="width: 90px;">Latency</th>
+                  <th>Result / Detail</th>
+                </tr>
+              </thead>
+              <tbody id="log-table-body">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">
+                    No outbound traffic generated yet. Click "Start Traffic" to begin.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-content">
+      <div>
+        <span>Azure Chatty Application &bull; Port 8000 &bull; Built for Azure NAT Gateway & VM Scale Set Architecture</span>
+      </div>
+      <div class="footer-links">
+        <a href="/health" target="_blank">GET /health</a>
+        <a href="/stats" target="_blank">GET /stats</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Interactive Logic -->
+  <script>
+    let pollInterval = null;
+    let isTestRunning = false;
+
+    function syncVal(sourceId, targetId, displayId, suffix = '') {
+      const val = document.getElementById(sourceId).value;
+      document.getElementById(targetId).value = val;
+      if (displayId) {
+        document.getElementById(displayId).textContent = val + suffix;
+      }
+    }
+
+    function setPresetUrl(url) {
+      document.getElementById('target-url').value = url;
+    }
+
+    async function startTest() {
+      const targetUrl = document.getElementById('target-url').value.trim();
+      const totalRequests = parseInt(document.getElementById('total-requests').value, 10);
+      const targetRps = parseInt(document.getElementById('target-rps').value, 10);
+      const concurrentWorkers = parseInt(document.getElementById('concurrent-workers').value, 10);
+      const reuseConnections = document.getElementById('reuse-connections').checked;
+
+      const payload = {
+        target_url: targetUrl,
+        total_requests: totalRequests,
+        requests_per_second: targetRps,
+        concurrent_workers: concurrentWorkers,
+        reuse_connections: reuseConnections
+      };
+
+      try {
+        const res = await fetch('/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          alert('Error starting test: ' + (err.detail || res.statusText));
+          return;
+        }
+
+        updateUIState(true);
+        // Start fast polling
+        startPolling(600);
+      } catch (err) {
+        alert('Network error connecting to backend: ' + err.message);
+      }
+    }
+
+    async function stopTest() {
+      try {
+        const res = await fetch('/stop', { method: 'POST' });
+        if (res.ok) {
+          document.getElementById('btn-stop').disabled = true;
+          document.getElementById('status-text').textContent = 'STOPPING...';
+        }
+      } catch (err) {
+        console.error('Failed to send stop signal:', err);
+      }
+    }
+
+    async function resetStats() {
+      try {
+        const res = await fetch('/reset', { method: 'POST' });
+        if (res.ok) {
+          fetchStats();
+        }
+      } catch (err) {
+        console.error('Failed to reset stats:', err);
+      }
+    }
+
+    function updateUIState(running) {
+      isTestRunning = running;
+      document.getElementById('btn-start').disabled = running;
+      document.getElementById('btn-stop').disabled = !running;
+      document.getElementById('btn-reset').disabled = running;
+
+      const pill = document.getElementById('status-pill');
+      const text = document.getElementById('status-text');
+
+      if (running) {
+        pill.className = 'status-pill running';
+        text.textContent = 'RUNNING';
+      }
+    }
+
+    async function fetchStats() {
+      try {
+        const res = await fetch('/stats');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // Update Hostname & Target
+        if (data.hostname) {
+          document.getElementById('server-hostname').textContent = data.hostname;
+        }
+
+        // Update KPIs
+        document.getElementById('metric-total').textContent = data.total_requests.toLocaleString();
+        document.getElementById('metric-target-sub').textContent = `Target: ${data.target_total_requests.toLocaleString()}`;
+        document.getElementById('metric-success').textContent = data.successful_requests.toLocaleString();
+        document.getElementById('metric-failed').textContent = data.failed_requests.toLocaleString();
+
+        const successRate = data.total_requests > 0 
+          ? ((data.successful_requests / data.total_requests) * 100).toFixed(1)
+          : '100.0';
+        const failRate = data.total_requests > 0 
+          ? ((data.failed_requests / data.total_requests) * 100).toFixed(1)
+          : '0.0';
+
+        document.getElementById('metric-success-rate').textContent = `${successRate}% Success`;
+        document.getElementById('metric-fail-rate').textContent = `${failRate}% Drop / Timeout`;
+
+        document.getElementById('metric-rps').textContent = data.requests_per_second.toFixed(1);
+        document.getElementById('metric-avg-latency').textContent = data.average_response_time_ms.toFixed(1) + ' ms';
+        document.getElementById('metric-latency-range').textContent = `Min: ${data.min_response_time_ms || 0}ms | Max: ${data.max_response_time_ms || 0}ms`;
+
+        document.getElementById('metric-workers').textContent = `${data.active_workers} / ${data.concurrent_workers}`;
+        document.getElementById('elapsed-time').textContent = `Elapsed: ${data.elapsed_seconds || 0}s`;
+
+        // Update Progress Bar
+        const pct = data.target_total_requests > 0
+          ? Math.min(100, Math.round((data.total_requests / data.target_total_requests) * 100))
+          : 0;
+        document.getElementById('progress-bar').style.width = pct + '%';
+        document.getElementById('progress-percentage').textContent = pct + '%';
+
+        // Update Status Pill
+        const pill = document.getElementById('status-pill');
+        const text = document.getElementById('status-text');
+
+        if (data.is_running) {
+          pill.className = 'status-pill running';
+          text.textContent = 'RUNNING';
+          document.getElementById('btn-start').disabled = true;
+          document.getElementById('btn-stop').disabled = false;
+          document.getElementById('btn-reset').disabled = true;
+        } else {
+          document.getElementById('btn-start').disabled = false;
+          document.getElementById('btn-stop').disabled = true;
+          document.getElementById('btn-reset').disabled = false;
+
+          if (data.status === 'completed') {
+            pill.className = 'status-pill completed';
+            text.textContent = 'COMPLETED';
+          } else if (data.status === 'stopped') {
+            pill.className = 'status-pill stopping';
+            text.textContent = 'STOPPED';
+          } else {
+            pill.className = 'status-pill idle';
+            text.textContent = 'IDLE';
+          }
+        }
+
+        // Error Summary
+        const errContainer = document.getElementById('error-tags-container');
+        const errBox = document.getElementById('error-summary-box');
+        const errKeys = Object.keys(data.error_summary || {});
+        if (errKeys.length > 0) {
+          errBox.style.display = 'block';
+          errContainer.innerHTML = errKeys.map(k => `
+            <span class="error-tag"><strong>${data.error_summary[k]}x</strong> ${k}</span>
+          `).join('');
+        } else {
+          errBox.style.display = 'none';
+        }
+
+        // Live Log Table
+        if (data.recent_logs && data.recent_logs.length > 0) {
+          document.getElementById('log-count').textContent = `${data.recent_logs.length} in window`;
+          const reversed = [...data.recent_logs].reverse();
+          const rows = reversed.map(log => `
+            <tr>
+              <td style="color: var(--azure-cyan);">#${log.id}</td>
+              <td style="color: var(--text-dim);">${log.time}</td>
+              <td>W-${log.worker}</td>
+              <td>
+                <span class="code-badge ${log.success ? 'ok' : 'err'}">
+                  ${log.status}
+                </span>
+              </td>
+              <td>${log.latency_ms} ms</td>
+              <td style="color: ${log.success ? 'var(--text-main)' : '#fca5a5'};">${log.message}</td>
+            </tr>
+          `).join('');
+          document.getElementById('log-table-body').innerHTML = rows;
+        } else if (data.total_requests === 0) {
+          document.getElementById('log-table-body').innerHTML = `
+            <tr>
+              <td colspan="6" style="text-align: center; color: var(--text-dim); padding: 1.5rem;">
+                No outbound traffic generated yet. Click "Start Traffic" to begin.
+              </td>
+            </tr>
+          `;
+          document.getElementById('log-count').textContent = '0 recorded';
+        }
+
+        // Adjust polling frequency based on running state
+        if (!data.is_running && isTestRunning) {
+          isTestRunning = false;
+          startPolling(2000); // Slower polling when idle
+        }
+      } catch (err) {
+        console.warn('Failed to poll statistics:', err);
+      }
+    }
+
+    function startPolling(intervalMs) {
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(fetchStats, intervalMs);
+    }
+
+    // Initial load
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchStats();
+      startPolling(2000);
+    });
+  </script>
+</body>
+</html>
